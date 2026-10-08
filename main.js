@@ -14,7 +14,9 @@ const CONFIG = {
     interval: 35000,                    // 截屏间隔 (ms) = 35秒（2026-09-22 由 20 秒调大：和本地 AI 抢 GPU）
   ollamaHost: '127.0.0.1',           // 用 IPv4 地址，避免 localhost 解析为 ::1 导致连不上
   ollamaPort: 11434,
-  model: 'qwen3-vl:8b-instruct',      // Ollama 模型名称 (instruct 版本)
+  // Ollama 模型名称（必须是支持图像输入的视觉模型）
+  // 可用环境变量 SCREEN_TRACKER_MODEL 覆盖，便于按机器性能切换而不改代码
+  model: process.env.SCREEN_TRACKER_MODEL || 'qwen3-vl:8b-instruct',
   dataDir: path.join(_dataRoot, 'data'),
   screenshotsDir: path.join(_dataRoot, 'data', 'screenshots'),
   logsDir: path.join(_dataRoot, 'data', 'logs'),
