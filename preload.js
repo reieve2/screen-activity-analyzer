@@ -16,6 +16,7 @@ contextBridge.exposeInMainWorld('api', {
   getHistoryDates: () => ipcRenderer.invoke('get-history-dates'),
   getHistoryLogs: (dateStr) => ipcRenderer.invoke('get-history-logs', { dateStr }),
   getScreenshot: (imagePath) => ipcRenderer.invoke('get-screenshot', imagePath),
+  getThumbnail: (imagePath, width) => ipcRenderer.invoke('get-thumbnail', { imagePath, width }),
   generateDailySummary: (dateStr) => ipcRenderer.invoke('generate-daily-summary', { dateStr }),
   getDailySummary: (dateStr) => ipcRenderer.invoke('get-daily-summary', { dateStr }),
 

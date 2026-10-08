@@ -12,11 +12,20 @@ const summaryMeta = document.getElementById('summaryMeta')
 const closeSummaryBtn = document.getElementById('closeSummaryBtn')
 const entryList = document.getElementById('entryList')
 const detailView = document.getElementById('detailView')
+const pagerEl = document.getElementById('entryPager')
+const pageInfoEl = document.getElementById('entryPageInfo')
+const prevPageBtn = document.getElementById('entryPrevPage')
+const nextPageBtn = document.getElementById('entryNextPage')
 
 // ==================== State ====================
 let availableDates = []
 let currentEntries = []
 let selectedEntryIndex = -1
+let currentPage = 0
+
+// 一页最多渲染 100 条：一天可能有几千条记录，全量渲染会同时创建几千个
+// DOM 节点与图片位图，是渲染进程内存暴涨的主因
+const PAGE_SIZE = 100
 
 // ==================== Date Helpers ====================
 
@@ -53,6 +62,7 @@ async function loadDate(dateStr) {
   detailView.innerHTML = '<div class="empty-state"><p>点击左侧记录查看详情</p></div>'
   currentEntries = []
   selectedEntryIndex = -1
+  currentPage = 0
 
   try {
     currentEntries = await window.api.getHistoryLogs(dateStr)
@@ -75,13 +85,21 @@ async function loadDate(dateStr) {
 // ==================== Rendering ====================
 
 function renderEntryList() {
+  // 先断开旧图片的引用并清空 DOM，让渲染进程可以回收上一页占用的内存
+  entryList.querySelectorAll('img').forEach(img => { img.src = '' })
+  entryList.innerHTML = ''
+
   if (currentEntries.length === 0) {
     entryList.innerHTML = '<div class="empty-state"><p>该日期没有记录</p></div>'
+    updatePager()
     return
   }
 
-  entryList.innerHTML = ''
-  currentEntries.forEach((entry, index) => {
+  const start = currentPage * PAGE_SIZE
+  const pageItems = currentEntries.slice(start, start + PAGE_SIZE)
+
+  pageItems.forEach((entry, i) => {
+    const index = start + i
     const item = document.createElement('div')
     item.className = 'entry-item'
     item.dataset.index = index
@@ -89,7 +107,6 @@ function renderEntryList() {
     const thumb = document.createElement('div')
     thumb.className = 'entry-thumb-placeholder'
     thumb.textContent = '🖼'
-    thumb.id = `thumb-${index}`
 
     const info = document.createElement('div')
     info.className = 'entry-info'
@@ -111,27 +128,72 @@ function renderEntryList() {
     item.addEventListener('click', () => selectEntry(index))
     entryList.appendChild(item)
 
-    // 异步加载缩略图
-    loadThumbnail(index, entry.imagePath)
+    // 缩略图按需加载：只有滚动到可见区域的条目才会向主进程请求
+    if (entry.imagePath) observeThumb(thumb, entry.imagePath)
   })
+
+  updatePager()
 }
 
-async function loadThumbnail(index, imagePath) {
-  if (!imagePath) return
+// 可见性观察器：列表滚动到哪就加载到哪里，屏幕外的条目不发请求
+const thumbObserver = ('IntersectionObserver' in window)
+  ? new IntersectionObserver((entries, observer) => {
+      entries.forEach(entry => {
+        if (!entry.isIntersecting) return
+        observer.unobserve(entry.target)
+        const imagePath = entry.target.dataset.thumbPath
+        if (imagePath) loadThumbnail(entry.target, imagePath)
+      })
+    }, { root: null, rootMargin: '200px 0px' })
+  : null
+
+function observeThumb(placeholder, imagePath) {
+  placeholder.dataset.thumbPath = imagePath
+  if (thumbObserver) {
+    thumbObserver.observe(placeholder)
+  } else {
+    loadThumbnail(placeholder, imagePath)
+  }
+}
+
+async function loadThumbnail(placeholder, imagePath) {
   try {
-    const result = await window.api.getScreenshot(imagePath)
-    if (result.success) {
-      const thumbEl = document.getElementById(`thumb-${index}`)
-      if (thumbEl) {
-        const img = document.createElement('img')
-        img.className = 'entry-thumb'
-        img.src = result.data
-        thumbEl.replaceWith(img)
-      }
+    // 关键：取缩略图（约 5KB），而不是整张截图（约 300KB，base64 后约 400KB）
+    const result = await window.api.getThumbnail(imagePath, 160)
+    if (result && result.success && placeholder.isConnected) {
+      const img = document.createElement('img')
+      img.className = 'entry-thumb'
+      img.src = result.data
+      placeholder.replaceWith(img)
     }
   } catch {
     // 缩略图加载失败不影响列表
   }
+}
+
+// ==================== Pagination ====================
+
+function updatePager() {
+  const total = currentEntries.length
+  if (total <= PAGE_SIZE) {
+    pagerEl.style.display = 'none'
+    return
+  }
+
+  const pageCount = Math.ceil(total / PAGE_SIZE)
+  pagerEl.style.display = 'flex'
+  pageInfoEl.textContent = `第 ${currentPage + 1} / ${pageCount} 页 · 共 ${total} 条`
+  prevPageBtn.disabled = currentPage === 0
+  nextPageBtn.disabled = currentPage >= pageCount - 1
+}
+
+function goToPage(page) {
+  const pageCount = Math.max(1, Math.ceil(currentEntries.length / PAGE_SIZE))
+  const target = Math.min(Math.max(0, page), pageCount - 1)
+  if (target === currentPage) return
+  currentPage = target
+  entryList.parentElement.scrollTop = 0
+  renderEntryList()
 }
 
 function selectEntry(index) {
@@ -319,6 +381,8 @@ datePicker.addEventListener('change', () => {
 
 prevDayBtn.addEventListener('click', () => navigateDate(-1))
 nextDayBtn.addEventListener('click', () => navigateDate(1))
+prevPageBtn.addEventListener('click', () => goToPage(currentPage - 1))
+nextPageBtn.addEventListener('click', () => goToPage(currentPage + 1))
 summaryBtn.addEventListener('click', handleGenerateSummary)
 closeSummaryBtn.addEventListener('click', hideSummary)
 

@@ -1,7 +1,7 @@
 'use strict'
 
 // ==================== Imports ====================
-const { app, BrowserWindow, ipcMain, nativeImage, Tray, Menu, Notification } = require('electron')
+const { app, BrowserWindow, ipcMain, nativeImage, Tray, Menu, Notification, powerMonitor } = require('electron')
 const path = require('path')
 const fs = require('fs')
 const http = require('http')
@@ -29,7 +29,13 @@ const CONFIG = {
   aggregationTimeout: 180000,         // 汇总请求超时 (ms)
   diaryDir: path.join(_dataRoot, 'data', 'summaries', 'diary'),
   diaryTimeout: 300000,               // 日记生成超时 (ms)
-  qaTimeout: 120000                   // 问答 LLM 调用超时 (ms)
+  qaTimeout: 120000,                  // 问答 LLM 调用超时 (ms)
+  idlePauseSec: 300,                  // 无键盘/鼠标输入超过该秒数则自动暂停采集（0 = 关闭）
+  skipUnchanged: true,                // 画面与上一张基本相同则跳过 Ollama 推理
+  unchangedThreshold: 4,              // 画面差异阈值 (0-255)，越大越宽松。
+                                      // 实测（16x9 亮度网格，真实截图 390 组相邻对比）：
+                                      // 画面静止时差异 < 1，真实切换窗口时 > 8，取 4 作为保守分界
+  savedImageWidth: 1280               // 落盘截图的宽度（0 = 保持原始尺寸）
 }
 
 // ==================== Global State ====================
@@ -45,6 +51,7 @@ let stats = {
   totalCaptures: 0,
   totalAnalyses: 0,
   totalErrors: 0,
+  totalSkipped: 0,
   startTime: null
 }
 
@@ -57,6 +64,15 @@ let lastCapture = {
 
 let recentLogs = []
 const MAX_LOGS = 100
+
+// 自动暂停状态（空闲 / 锁屏 / 休眠）
+// 目的：停止向 Ollama 发请求，让模型在 keep_alive 到期后自动卸载，把内存还给系统
+let isPaused = false
+let pauseReason = ''
+let idleCheckTimer = null
+
+// 上一次截图的画面网格，用于判断"画面是否基本没变"
+let lastFrameGrid = null
 
 // 10分钟汇总状态
 let isAggregating = false
@@ -125,6 +141,8 @@ function sendToRenderer(channel, data) {
 function sendStatusUpdate() {
   sendToRenderer('status-update', {
     isRunning: isTracking,
+    paused: isPaused,
+    pauseReason,
     ollamaConnected,
     stats: { ...stats },
     lastCapture: { ...lastCapture },
@@ -142,9 +160,16 @@ async function captureScreenshot() {
 
 // ==================== Image Processing ====================
 
-function saveImageToDisk(buffer, date) {
-  const img = nativeImage.createFromBuffer(buffer)
-  const jpegBuffer = img.toJPEG(CONFIG.saveImageQuality)
+// 注意：以下两个函数接收已经解码好的 nativeImage（而不是原始 Buffer）。
+// 原实现让两者各自 createFromBuffer，同一张截图会被解码成两份全尺寸位图
+// （2560x1440 每份约 14.7 MB），这里改为调用方解码一次后复用。
+function saveImageToDisk(img, date) {
+  const size = img.getSize()
+  const targetWidth = CONFIG.savedImageWidth
+  const out = (targetWidth > 0 && size.width > targetWidth)
+    ? img.resize({ width: targetWidth, quality: 'good' })
+    : img
+  const jpegBuffer = out.toJPEG(CONFIG.saveImageQuality)
 
   const monthFolder = getMonthFolder(date)
   const dir = path.join(CONFIG.screenshotsDir, monthFolder)
@@ -158,8 +183,7 @@ function saveImageToDisk(buffer, date) {
   return path.join('screenshots', monthFolder, filename)
 }
 
-function prepareImageForOllama(buffer) {
-  const img = nativeImage.createFromBuffer(buffer)
+function prepareImageForOllama(img) {
   const size = img.getSize()
 
   let resized = img
@@ -168,6 +192,53 @@ function prepareImageForOllama(buffer) {
   }
 
   return resized.toJPEG(CONFIG.ollamaImageQuality).toString('base64')
+}
+
+// ==================== 画面变化检测 ====================
+// 把截图缩到 64px 宽，切成 16x9 网格取平均亮度，得到指纹。
+// 用网格平均值而不是完整哈希，是为了对时钟、闪烁光标这类小变化不敏感，
+// 只判断"整屏画面是否基本没变"，从而跳过整次 Ollama 推理。
+function computeFrameGrid(img) {
+  const small = img.resize({ width: 64, quality: 'good' })
+  const { width, height } = small.getSize()
+  const bmp = small.toBitmap() // BGRA 原始像素
+
+  const COLS = 16
+  const ROWS = 9
+  const cellW = Math.max(1, Math.floor(width / COLS))
+  const cellH = Math.max(1, Math.floor(height / ROWS))
+  const grid = []
+
+  for (let gy = 0; gy < ROWS; gy++) {
+    for (let gx = 0; gx < COLS; gx++) {
+      const x0 = gx * cellW
+      const y0 = gy * cellH
+      let sum = 0
+      let count = 0
+
+      for (let y = y0; y < y0 + cellH; y += 2) {
+        for (let x = x0; x < x0 + cellW; x += 2) {
+          const px = (y * width + x) * 4
+          // BGRA → 粗略亮度
+          sum += bmp[px] * 0.114 + bmp[px + 1] * 0.587 + bmp[px + 2] * 0.299
+          count++
+        }
+      }
+
+      grid.push(count ? sum / count : 0)
+    }
+  }
+
+  return grid
+}
+
+function framesAreSimilar(a, b, threshold) {
+  if (!a || !b || a.length !== b.length) return false
+  let diff = 0
+  for (let i = 0; i < a.length; i++) {
+    diff += Math.abs(a[i] - b[i])
+  }
+  return (diff / a.length) < threshold
 }
 
 // ==================== Ollama API ====================
@@ -1652,10 +1723,65 @@ async function captureAndAnalyze() {
     return
   }
 
-  // Step 2: 保存截图到磁盘
+  // Step 2: 只解码一次，后续保存与推理复用同一个 nativeImage
+  let img
+  try {
+    img = nativeImage.createFromBuffer(screenshotBuffer)
+    if (img.isEmpty()) throw new Error('图片解码结果为空')
+  } catch (err) {
+    addLog('error', `截图解码失败: ${err.message}`)
+    stats.totalErrors++
+    sendStatusUpdate()
+    return
+  }
+
+  // Step 3: 判断画面是否基本没变；没变就不做推理，也不新增截图文件
+  let frameGrid = null
+  try {
+    frameGrid = computeFrameGrid(img)
+  } catch {
+    frameGrid = null
+  }
+
+  if (CONFIG.skipUnchanged && framesAreSimilar(lastFrameGrid, frameGrid, CONFIG.unchangedThreshold)) {
+    lastFrameGrid = frameGrid
+    stats.totalCaptures++
+    stats.totalSkipped++
+
+    const logEntry = {
+      timestamp,
+      timestampMs: date.getTime(),
+      imagePath: lastCapture.imagePath || null,
+      activity: lastCapture.activity || '（画面无变化）',
+      analysisTimeMs: 0,
+      unchanged: true
+    }
+
+    try {
+      saveLogEntry(logEntry, date)
+    } catch (err) {
+      addLog('error', `保存日志失败: ${err.message}`)
+      stats.totalErrors++
+    }
+
+    lastCapture = {
+      timestamp,
+      imagePath: logEntry.imagePath,
+      activity: logEntry.activity,
+      analysisTime: 0
+    }
+
+    addLog('info', '画面与上一张基本相同，跳过 AI 分析')
+    sendStatusUpdate()
+    return
+  }
+
+  lastFrameGrid = frameGrid
+
+  // Step 4: 保存截图到磁盘（按 savedImageWidth 降采样，节省磁盘）
   let relativeImagePath
   try {
-    relativeImagePath = saveImageToDisk(screenshotBuffer, date)
+    relativeImagePath = saveImageToDisk(img, date)
     addLog('info', `截图已保存: ${relativeImagePath}`)
   } catch (err) {
     addLog('error', `保存截图失败: ${err.message}`)
@@ -1665,12 +1791,12 @@ async function captureAndAnalyze() {
   }
   stats.totalCaptures++
 
-  // Step 3: 调用 Ollama 分析
+  // Step 5: 调用 Ollama 分析
   let activity = '（分析失败）'
   let analysisTime = 0
 
   try {
-    const imageBase64 = prepareImageForOllama(screenshotBuffer)
+    const imageBase64 = prepareImageForOllama(img)
     addLog('info', `调用 Ollama ${CONFIG.model} 分析中...`)
 
     const startTime = Date.now()
@@ -1686,7 +1812,7 @@ async function captureAndAnalyze() {
     activity = `（分析失败: ${err.message}）`
   }
 
-  // Step 4: 保存日志记录
+  // Step 6: 保存日志记录
   const logEntry = {
     timestamp,
     timestampMs: date.getTime(),
@@ -1714,7 +1840,8 @@ async function captureAndAnalyze() {
 }
 
 async function captureLoop() {
-  if (!isTracking) return
+  if (!isTracking || isPaused) return
+  captureTimer = null
 
   try {
     await captureAndAnalyze()
@@ -1723,7 +1850,7 @@ async function captureLoop() {
   }
 
   // 等待间隔后继续 (在上一次完成后才开始计时)
-  if (isTracking) {
+  if (isTracking && !isPaused) {
     captureTimer = setTimeout(captureLoop, CONFIG.interval)
   }
 }
@@ -1732,6 +1859,11 @@ async function captureLoop() {
 
 async function startTracking() {
   if (isTracking) return
+
+  // 手动启动时清掉自动暂停状态，并强制分析下一帧
+  isPaused = false
+  pauseReason = ''
+  lastFrameGrid = null
 
   // 检查 Ollama 连接
   const status = await checkOllamaStatus()
@@ -1755,6 +1887,8 @@ function stopTracking() {
   if (!isTracking) return
 
   isTracking = false
+  isPaused = false
+  pauseReason = ''
   if (captureTimer) {
     clearTimeout(captureTimer)
     captureTimer = null
@@ -1762,6 +1896,62 @@ function stopTracking() {
 
   addLog('warn', '追踪已停止')
   sendStatusUpdate()
+}
+
+// ==================== 空闲 / 锁屏自动暂停 ====================
+// 采集循环每 35 秒就会向 Ollama 发一次请求，会把模型的 keep_alive 一直续期，
+// 导致 6-8 GB 的视觉模型在整段"追踪中"时间里常驻内存。
+// 空闲、锁屏、休眠时暂停采集，模型就能在 keep_alive 到期后自动卸载。
+
+function pauseTracking(reason) {
+  if (!isTracking || isPaused) return
+
+  isPaused = true
+  pauseReason = reason
+
+  if (captureTimer) {
+    clearTimeout(captureTimer)
+    captureTimer = null
+  }
+
+  addLog('warn', `已自动暂停采集（${reason}），Ollama 模型将在空闲后自动卸载`)
+  sendStatusUpdate()
+}
+
+function resumeTracking() {
+  if (!isTracking || !isPaused) return
+
+  isPaused = false
+  pauseReason = ''
+  lastFrameGrid = null // 恢复后强制分析第一帧
+
+  addLog('success', '已恢复采集')
+  sendStatusUpdate()
+
+  if (!captureTimer) captureLoop()
+}
+
+function checkIdleState() {
+  if (!isTracking || CONFIG.idlePauseSec <= 0) return
+
+  const idleSec = powerMonitor.getSystemIdleTime()
+  if (idleSec >= CONFIG.idlePauseSec) {
+    pauseTracking(`无操作 ${Math.floor(idleSec / 60)} 分钟`)
+  } else if (isPaused) {
+    resumeTracking()
+  }
+}
+
+function initPowerMonitor() {
+  if (CONFIG.idlePauseSec > 0) {
+    idleCheckTimer = setInterval(checkIdleState, 15000)
+    addLog('info', `空闲自动暂停已启用 (${CONFIG.idlePauseSec}s)`)
+  }
+
+  powerMonitor.on('lock-screen', () => pauseTracking('锁屏'))
+  powerMonitor.on('suspend', () => pauseTracking('系统休眠'))
+  powerMonitor.on('unlock-screen', () => resumeTracking())
+  powerMonitor.on('resume', () => resumeTracking())
 }
 
 // ==================== IPC Handlers ====================
@@ -1779,6 +1969,8 @@ ipcMain.handle('stop', () => {
 ipcMain.handle('get-status', () => {
   return {
     isRunning: isTracking,
+    paused: isPaused,
+    pauseReason,
     ollamaConnected,
     stats: { ...stats },
     lastCapture: { ...lastCapture },
@@ -1814,14 +2006,57 @@ ipcMain.handle('get-history-logs', (event, params) => {
   return getLogsForDate(params.dateStr)
 })
 
-ipcMain.handle('get-screenshot', (event, relativePath) => {
+// 缩略图内存缓存（LRU，上限 400 张，约 2-3 MB）
+const thumbCache = new Map()
+const THUMB_CACHE_MAX = 400
+
+ipcMain.handle('get-screenshot', async (event, relativePath) => {
   try {
     const fullPath = path.join(CONFIG.dataDir, relativePath)
-    if (!fs.existsSync(fullPath)) {
+    const buffer = await fs.promises.readFile(fullPath)
+    return { success: true, data: 'data:image/jpeg;base64,' + buffer.toString('base64') }
+  } catch (err) {
+    if (err && err.code === 'ENOENT') {
       return { success: false, error: '文件不存在' }
     }
-    const buffer = fs.readFileSync(fullPath)
-    return { success: true, data: 'data:image/jpeg;base64,' + buffer.toString('base64') }
+    return { success: false, error: err.message }
+  }
+})
+
+// 历史列表专用：返回小尺寸缩略图。
+// 原实现让列表里每一条记录都通过 get-screenshot 取整张 1920px 截图
+// （约 300KB，base64 后约 400KB，解码后约 8MB 位图），一天几千条记录会直接吃光内存。
+ipcMain.handle('get-thumbnail', (event, params) => {
+  try {
+    const relativePath = params && params.imagePath
+    if (!relativePath) {
+      return { success: false, error: '缺少图片路径' }
+    }
+
+    const width = Math.max(64, Math.min(Number(params && params.width) || 160, 480))
+    const cacheKey = width + '|' + relativePath
+
+    const cached = thumbCache.get(cacheKey)
+    if (cached) {
+      return { success: true, data: cached }
+    }
+
+    const fullPath = path.join(CONFIG.dataDir, relativePath)
+    const img = nativeImage.createFromPath(fullPath)
+    if (img.isEmpty()) {
+      return { success: false, error: '无法读取图片' }
+    }
+
+    const size = img.getSize()
+    const resized = size.width > width ? img.resize({ width, quality: 'good' }) : img
+    const data = 'data:image/jpeg;base64,' + resized.toJPEG(72).toString('base64')
+
+    thumbCache.set(cacheKey, data)
+    if (thumbCache.size > THUMB_CACHE_MAX) {
+      thumbCache.delete(thumbCache.keys().next().value)
+    }
+
+    return { success: true, data }
   } catch (err) {
     return { success: false, error: err.message }
   }
@@ -2227,6 +2462,9 @@ app.whenReady().then(async () => {
 
   addLog('info', '应用已启动')
   addLog('info', `配置: 间隔=${CONFIG.interval / 1000}s, 模型=${CONFIG.model}`)
+
+  // 空闲/锁屏自动暂停（避免模型被持续续期而常驻内存）
+  initPowerMonitor()
 
   // 检查 Ollama 连接
   const status = await checkOllamaStatus()

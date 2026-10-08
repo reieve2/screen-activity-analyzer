@@ -415,3 +415,43 @@ body {
   max-height: 95vh;
   border-radius: 4px;
 }
+
+/* ==================== Pager ==================== */
+/* 记录列表分页：一天几千条时只渲染当前页，控制 DOM 与图片内存 */
+.entry-pager {
+  position: sticky;
+  bottom: 0;
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 8px;
+  padding: 8px 10px;
+  background: #16162a;
+  border-top: 1px solid #252540;
+}
+
+.pager-btn {
+  background: #252540;
+  color: #d0d0e0;
+  border: 1px solid #353560;
+  border-radius: 6px;
+  padding: 4px 10px;
+  font-size: 12px;
+  font-family: inherit;
+  cursor: pointer;
+}
+
+.pager-btn:hover:not(:disabled) {
+  background: #31315a;
+}
+
+.pager-btn:disabled {
+  opacity: 0.4;
+  cursor: default;
+}
+
+.pager-info {
+  color: #8b8bb0;
+  font-size: 12px;
+  white-space: nowrap;
+}

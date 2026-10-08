@@ -8,6 +8,7 @@ const ollamaStatus = document.getElementById('ollamaStatus')
 const lastCaptureDiv = document.getElementById('lastCapture')
 const totalCapturesEl = document.getElementById('totalCaptures')
 const totalAnalysesEl = document.getElementById('totalAnalyses')
+const totalSkippedEl = document.getElementById('totalSkipped')
 const totalErrorsEl = document.getElementById('totalErrors')
 const logList = document.getElementById('logList')
 const cfgInterval = document.getElementById('cfgInterval')
@@ -20,9 +21,14 @@ let isRunning = false
 function updateUI(data) {
   isRunning = data.isRunning
 
-  // 追踪状态
-  trackingStatus.textContent = data.isRunning ? '运行中' : '已停止'
-  trackingStatus.className = 'badge ' + (data.isRunning ? 'badge-running' : 'badge-stopped')
+  // 追踪状态（isRunning 是用户意图，paused 是因空闲/锁屏自动暂停）
+  if (data.isRunning && data.paused) {
+    trackingStatus.textContent = '已暂停（' + (data.pauseReason || '空闲') + '）'
+    trackingStatus.className = 'badge badge-stopped'
+  } else {
+    trackingStatus.textContent = data.isRunning ? '运行中' : '已停止'
+    trackingStatus.className = 'badge ' + (data.isRunning ? 'badge-running' : 'badge-stopped')
+  }
 
   // Ollama 状态
   if (data.ollamaConnected === true) {
@@ -41,6 +47,7 @@ function updateUI(data) {
   if (data.stats) {
     totalCapturesEl.textContent = data.stats.totalCaptures || 0
     totalAnalysesEl.textContent = data.stats.totalAnalyses || 0
+    if (totalSkippedEl) totalSkippedEl.textContent = data.stats.totalSkipped || 0
     totalErrorsEl.textContent = data.stats.totalErrors || 0
   }
 
