@@ -11,7 +11,7 @@ const screenshot = require('screenshot-desktop')
 // 打包后 __dirname 指向 app.asar（只读），数据目录改用 userData 路径
 const _dataRoot = app.getPath('userData')
 const CONFIG = {
-  interval: 20000,                    // 截屏间隔 (ms) = 20秒
+    interval: 35000,                    // 截屏间隔 (ms) = 35秒（2026-09-22 由 20 秒调大：和本地 AI 抢 GPU）
   ollamaHost: '127.0.0.1',           // 用 IPv4 地址，避免 localhost 解析为 ::1 导致连不上
   ollamaPort: 11434,
   model: 'qwen3-vl:8b-instruct',      // Ollama 模型名称 (instruct 版本)
@@ -19,7 +19,7 @@ const CONFIG = {
   screenshotsDir: path.join(_dataRoot, 'data', 'screenshots'),
   logsDir: path.join(_dataRoot, 'data', 'logs'),
   saveImageQuality: 85,               // 保存到磁盘的 JPEG 质量
-  ollamaImageWidth: 1280,             // 发送给 Ollama 的图片最大宽度
+    ollamaImageWidth: 800,              // 发送给 Ollama 的图片最大宽度（2026-09-22 由 1280 降到 800：图片 token 约减半，预填充快很多）
   ollamaImageQuality: 75,             // 发送给 Ollama 的 JPEG 质量
   ollamaTimeout: 120000,              // Ollama 请求超时 (ms)
   prompt: '请仔细观察这张电脑截屏图片，用简短的5句话总结用户当前正在做什么。每句话描述一个方面，直接输出5句话，用句号分隔，不要加编号或其他格式。',
