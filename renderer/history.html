@@ -1,0 +1,57 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>Screen Tracker - 历史记录</title>
+  <link rel="stylesheet" href="history.css">
+</head>
+<body>
+  <div class="history-app">
+    <!-- 顶部导航栏 -->
+    <header class="history-header">
+      <div class="date-nav">
+        <button id="prevDayBtn" class="nav-btn" title="前一天">‹</button>
+        <input type="date" id="datePicker" class="date-picker">
+        <button id="nextDayBtn" class="nav-btn" title="后一天">›</button>
+      </div>
+      <div class="header-info">
+        <span id="entryCount" class="entry-count">0 条记录</span>
+        <button id="summaryBtn" class="btn btn-summary">生成每日总结</button>
+      </div>
+    </header>
+
+    <!-- 每日总结区域 -->
+    <section id="summarySection" class="summary-section" style="display:none;">
+      <div class="summary-header">
+        <h2>📋 每日活动总结</h2>
+        <button id="closeSummaryBtn" class="close-btn">✕</button>
+      </div>
+      <div id="summaryContent" class="summary-content"></div>
+      <div id="summaryMeta" class="summary-meta"></div>
+    </section>
+
+    <!-- 主体内容区 -->
+    <div class="history-body">
+      <!-- 左侧：记录列表 -->
+      <div class="entry-list-panel">
+        <div id="entryList" class="entry-list">
+          <div class="empty-state">
+            <p>选择日期查看记录</p>
+          </div>
+        </div>
+      </div>
+
+      <!-- 右侧：详情查看 -->
+      <div class="detail-panel">
+        <div id="detailView" class="detail-view">
+          <div class="empty-state">
+            <p>点击左侧记录查看详情</p>
+          </div>
+        </div>
+      </div>
+    </div>
+  </div>
+  <script src="history.js"></script>
+</body>
+</html>

@@ -1,0 +1,15 @@
+{
+  "name": "screen-tracker",
+  "version": "1.0.0",
+  "description": "Electron 截屏追踪器 - 每20秒截屏并用 Ollama qwen3-vl:8b-instruct 分析用户活动",
+  "main": "main.js",
+  "scripts": {
+    "start": "electron ."
+  },
+  "dependencies": {
+    "screenshot-desktop": "^1.15.0"
+  },
+  "devDependencies": {
+    "electron": "^28.0.0"
+  }
+}

@@ -1,0 +1,314 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>Screen Tracker</title>
+  <link rel="stylesheet" href="style.css">
+</head>
+<body>
+  <!-- 背景图层 -->
+  <div class="bg-layer">
+    <div class="bg-image"></div>
+    <div class="bg-overlay"></div>
+  </div>
+
+  <!-- 标签栏 -->
+  <nav class="tab-bar">
+    <button class="tab active" data-tab="home">主页</button>
+    <button class="tab" data-tab="activity">动态</button>
+    <button class="tab" data-tab="diary">日记</button>
+    <button class="tab" data-tab="dashboard">看板</button>
+    <button class="tab" data-tab="qa">问答</button>
+    <button class="tab" data-tab="settings">设置</button>
+    <div class="tab-right">
+      <span id="trackingStatus" class="badge badge-stopped">已停止</span>
+      <span id="ollamaStatus" class="badge badge-unknown">Ollama: 检测中</span>
+      <span id="aggStatusBadge" class="badge badge-agg" style="display:none;">
+        <span class="agg-spinner"></span> 汇总中
+      </span>
+      <span id="diaryStatusBadge" class="badge badge-diary" style="display:none;">
+        <span class="agg-spinner"></span> 日记中
+      </span>
+    </div>
+  </nav>
+
+  <!-- 主页标签页 -->
+  <div id="tab-home" class="tab-content active">
+    <div class="container">
+      <section class="card">
+        <h2>最近活动</h2>
+        <div id="lastCapture">
+          <p class="muted">等待第一次截屏...</p>
+        </div>
+      </section>
+
+      <section class="card stats-card">
+        <div class="stat">
+          <span class="stat-value" id="totalCaptures">0</span>
+          <span class="stat-label">截屏次数</span>
+        </div>
+        <div class="stat">
+          <span class="stat-value" id="totalAnalyses">0</span>
+          <span class="stat-label">分析次数</span>
+        </div>
+        <div class="stat">
+          <span class="stat-value" id="totalErrors">0</span>
+          <span class="stat-label">错误次数</span>
+        </div>
+      </section>
+
+      <section class="config-info">
+        <div class="config-row">
+          <span class="config-label">截屏间隔</span>
+          <span class="config-value" id="cfgInterval">20s</span>
+        </div>
+        <div class="config-row">
+          <span class="config-label">AI 模型</span>
+          <span class="config-value" id="cfgModel">qwen3-vl:8b-instruct</span>
+        </div>
+        <div class="config-row">
+          <span class="config-label">数据目录</span>
+          <span class="config-value">./data/</span>
+        </div>
+      </section>
+
+      <section class="controls">
+        <button id="toggleBtn" class="btn btn-primary">启动追踪</button>
+        <button id="checkOllamaBtn" class="btn btn-secondary">检查 Ollama</button>
+        <button id="historyBtn" class="btn btn-history">查看记录</button>
+      </section>
+
+      <section class="card log-section">
+        <h2>运行日志</h2>
+        <div id="logList" class="log-list">
+          <p class="muted">暂无日志</p>
+        </div>
+      </section>
+    </div>
+  </div>
+
+  <!-- 动态标签页 -->
+  <div id="tab-activity" class="tab-content">
+    <div class="activity-container">
+      <!-- 汇总状态条 -->
+      <div id="aggStatusBar" class="agg-status-bar" style="display:none;">
+        <span class="agg-spinner"></span>
+        <span id="aggStatusText">正在汇总活动...</span>
+        <span id="aggProgress" class="agg-progress"></span>
+      </div>
+
+      <!-- 热力图 -->
+      <section class="card heatmap-card">
+        <h2>活动热力图</h2>
+        <div id="heatmap" class="heatmap">
+          <p class="muted">暂无汇总数据</p>
+        </div>
+        <div class="heatmap-legend">
+          <span class="legend-item"><span class="dot dot-work"></span>工作</span>
+          <span class="legend-item"><span class="dot dot-entertainment"></span>娱乐</span>
+          <span class="legend-item"><span class="dot dot-study"></span>学习</span>
+          <span class="legend-item"><span class="dot dot-social"></span>社交</span>
+        </div>
+        <div id="heatmapTooltip" class="heatmap-tooltip" style="display:none;"></div>
+      </section>
+
+      <!-- 筛选栏 -->
+      <section class="filter-bar">
+        <select id="filterProject" class="filter-select">
+          <option value="">所有项目</option>
+        </select>
+        <select id="filterSoftware" class="filter-select">
+          <option value="">所有软件</option>
+        </select>
+        <input type="date" id="filterDate" class="filter-date">
+        <button id="clearFilterBtn" class="btn btn-small">清除筛选</button>
+      </section>
+
+      <!-- Timeline -->
+      <section class="timeline-section">
+        <div id="timeline" class="timeline">
+          <p class="muted">暂无活动记录</p>
+        </div>
+        <button id="loadMoreBtn" class="btn btn-secondary btn-load-more" style="display:none;">加载更多</button>
+      </section>
+    </div>
+  </div>
+
+  <!-- 日记标签页 -->
+  <div id="tab-diary" class="tab-content">
+    <!-- 日记生成状态条 -->
+    <div id="diaryStatusBar" class="agg-status-bar" style="display:none;">
+      <span class="agg-spinner"></span>
+      <span id="diaryStatusText">正在生成日记...</span>
+      <span id="diaryProgress" class="agg-progress"></span>
+    </div>
+    <div class="diary-container">
+      <!-- 日历 -->
+      <section class="card diary-calendar-card">
+        <div class="calendar-header">
+          <button id="prevMonth" class="btn btn-small">‹</button>
+          <span id="calendarMonthLabel" class="calendar-month-label"></span>
+          <button id="nextMonth" class="btn btn-small">›</button>
+        </div>
+        <div class="calendar-weekdays">
+          <span>一</span><span>二</span><span>三</span><span>四</span><span>五</span><span>六</span><span>日</span>
+        </div>
+        <div id="calendarGrid" class="calendar-grid"></div>
+      </section>
+
+      <!-- 日记内容 -->
+      <div id="diaryContent" class="diary-content">
+        <p class="muted">请选择一个日期查看日记</p>
+      </div>
+    </div>
+  </div>
+
+  <!-- 看板标签页 -->
+  <div id="tab-dashboard" class="tab-content">
+    <div class="dashboard-container">
+      <!-- 时间范围选择 -->
+      <section class="card dashboard-controls-card">
+        <div class="dashboard-controls">
+          <div class="range-selector">
+            <button class="range-btn active" data-range="day">天</button>
+            <button class="range-btn" data-range="week">周</button>
+            <button class="range-btn" data-range="month">月</button>
+            <button class="range-btn" data-range="year">年</button>
+          </div>
+          <input type="date" id="dashboardDate" class="filter-date">
+          <button id="refreshDashboard" class="btn btn-small">刷新</button>
+        </div>
+        <div id="dashboardDateRange" class="dashboard-date-range"></div>
+      </section>
+
+      <!-- 统计数字 -->
+      <section class="dashboard-stats">
+        <div class="dash-stat-card">
+          <span class="dash-stat-value" id="dashTotalTime">-</span>
+          <span class="dash-stat-label">总时间 (小时)</span>
+        </div>
+        <div class="dash-stat-card">
+          <span class="dash-stat-value" id="dashTotalEntries">-</span>
+          <span class="dash-stat-label">截屏次数</span>
+        </div>
+        <div class="dash-stat-card">
+          <span class="dash-stat-value" id="dashProjects">-</span>
+          <span class="dash-stat-label">项目数</span>
+        </div>
+        <div class="dash-stat-card">
+          <span class="dash-stat-value" id="dashSoftware">-</span>
+          <span class="dash-stat-label">软件数</span>
+        </div>
+      </section>
+
+      <!-- 图表区域 -->
+      <section class="card chart-card">
+        <h2>活动分类时间占比</h2>
+        <div class="chart-wrapper"><canvas id="chartCategoryPie"></canvas></div>
+      </section>
+
+      <section class="card chart-card">
+        <h2>软件使用频次排名 (Top 10)</h2>
+        <div class="chart-wrapper"><canvas id="chartSoftwareBar"></canvas></div>
+      </section>
+
+      <section class="card chart-card">
+        <h2>项目专注时间统计</h2>
+        <div class="chart-wrapper"><canvas id="chartProjectBar"></canvas></div>
+      </section>
+
+      <section class="card chart-card">
+        <h2>每小时活动量分布</h2>
+        <div class="chart-wrapper"><canvas id="chartHourlyLine"></canvas></div>
+      </section>
+
+      <section class="card chart-card">
+        <h2>每日分类时间堆叠</h2>
+        <div class="chart-wrapper"><canvas id="chartDailyStacked"></canvas></div>
+      </section>
+
+      <section class="card chart-card">
+        <h2>待办事项汇总</h2>
+        <div id="dashboardTodos" class="dashboard-todos"></div>
+      </section>
+    </div>
+  </div>
+
+  <!-- 问答标签页 -->
+  <div id="tab-qa" class="tab-content">
+    <div class="qa-container">
+      <div id="qaMessages" class="qa-messages">
+        <div class="qa-welcome">
+          <p class="qa-welcome-title">问答</p>
+          <p class="muted">向我提问关于你电脑使用活动的问题，我会先搜索相关记录再回答。</p>
+          <div class="qa-suggestions">
+            <button class="qa-suggestion">今天我主要在做什么？</button>
+            <button class="qa-suggestion">这周用了哪些软件？</button>
+            <button class="qa-suggestion">我什么时候在玩游戏？</button>
+            <button class="qa-suggestion">昨天有什么待办事项？</button>
+          </div>
+        </div>
+      </div>
+      <div class="qa-input-area">
+        <input type="text" id="qaInput" class="qa-input" placeholder="输入你的问题..." autocomplete="off">
+        <button id="qaSendBtn" class="btn btn-primary qa-send-btn">提问</button>
+      </div>
+    </div>
+  </div>
+
+  <!-- 设置标签页 -->
+  <div id="tab-settings" class="tab-content">
+    <div class="settings-container">
+      <!-- 预设主题 -->
+      <section class="card settings-section">
+        <h2>预设主题</h2>
+        <p class="settings-hint">选择一个预设方案，快速应用到所有页面</p>
+        <div id="presetGrid" class="preset-grid"></div>
+      </section>
+
+      <!-- 全局默认 -->
+      <section class="card settings-section">
+        <h2>全局默认</h2>
+        <p class="settings-hint">所有页面的默认字体设置，未被单独覆盖的页面将使用此设置</p>
+        <div class="font-control-row">
+          <label class="font-control-label">字体大小</label>
+          <div class="font-control-inputs">
+            <input type="range" id="globalFontSize" class="font-slider" min="10" max="28" step="1" value="14">
+            <span id="globalFontSizeVal" class="font-size-display">14px</span>
+          </div>
+        </div>
+        <div class="font-control-row">
+          <label class="font-control-label">字体颜色</label>
+          <div class="font-control-inputs">
+            <input type="color" id="globalFontColor" class="font-color-picker" value="#ffffff">
+            <span id="globalFontColorVal" class="font-color-display">#ffffff</span>
+          </div>
+        </div>
+        <div class="font-preview" id="globalPreview">这是一段预览文字，用于查看当前字体效果。Screen Tracker 帮你追踪每一刻。</div>
+      </section>
+
+      <!-- 分区域设置 -->
+      <section class="card settings-section">
+        <h2>分区域设置</h2>
+        <p class="settings-hint">为每个页面单独设置字体，开启开关后该页面将使用独立配置</p>
+        <div id="areaSettingsList" class="area-settings-list"></div>
+      </section>
+
+      <!-- 操作按钮 -->
+      <section class="settings-actions">
+        <button id="resetSettingsBtn" class="btn btn-secondary">恢复默认</button>
+        <button id="saveSettingsBtn" class="btn btn-primary">保存设置</button>
+      </section>
+    </div>
+  </div>
+
+  <script src="chart.umd.min.js"></script>
+  <script src="renderer.js"></script>
+  <script src="activity.js"></script>
+  <script src="diary.js"></script>
+  <script src="dashboard.js"></script>
+  <script src="qa.js"></script>
+  <script src="settings.js"></script>
+</body>
+</html>

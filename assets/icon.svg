@@ -1,0 +1,41 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 1024 1024">
+  <defs>
+    <linearGradient id="bg" x1="0%" y1="0%" x2="100%" y2="100%">
+      <stop offset="0%" stop-color="#1a1a2e"/>
+      <stop offset="100%" stop-color="#312e81"/>
+    </linearGradient>
+    <linearGradient id="glow" x1="0%" y1="0%" x2="100%" y2="100%">
+      <stop offset="0%" stop-color="#818cf8"/>
+      <stop offset="100%" stop-color="#c084fc"/>
+    </linearGradient>
+    <linearGradient id="screenGrad" x1="0%" y1="0%" x2="0%" y2="100%">
+      <stop offset="0%" stop-color="#0f172a"/>
+      <stop offset="100%" stop-color="#1e1b4b"/>
+    </linearGradient>
+    <filter id="softGlow" x="-20%" y="-20%" width="140%" height="140%">
+      <feGaussianBlur in="SourceGraphic" stdDeviation="12"/>
+    </filter>
+  </defs>
+
+  <!-- Rounded square background -->
+  <rect x="0" y="0" width="1024" height="1024" rx="224" ry="224" fill="url(#bg)"/>
+
+  <!-- Outer soft glow ring -->
+  <rect x="96" y="96" width="832" height="832" rx="176" ry="176" fill="none" stroke="url(#glow)" stroke-width="8" opacity="0.35" filter="url(#softGlow)"/>
+
+  <!-- Monitor/screen frame -->
+  <rect x="172" y="220" width="680" height="480" rx="48" ry="48" fill="url(#screenGrad)" stroke="#6366f1" stroke-width="16"/>
+
+  <!-- Activity waveform inside screen -->
+  <path d="M 252 460 L 340 460 L 380 360 L 440 560 L 500 420 L 560 500 L 620 340 L 680 460 L 772 460" fill="none" stroke="url(#glow)" stroke-width="28" stroke-linecap="round" stroke-linejoin="round"/>
+
+  <!-- Stand/base of monitor -->
+  <path d="M 392 700 L 440 700 L 460 740 L 564 740 L 584 700 L 632 700 C 652 700 666 714 666 732 C 666 750 652 764 632 764 L 392 764 C 372 764 358 750 358 732 C 358 714 372 700 392 700 Z" fill="#4f46e5"/>
+
+  <!-- Tracking dot / status indicator -->
+  <circle cx="756" cy="300" r="28" fill="#f472b6"/>
+  <circle cx="756" cy="300" r="44" fill="#f472b6" opacity="0.35"/>
+
+  <!-- Subtle corner highlights -->
+  <path d="M 196 260 Q 196 244 212 244 L 280 244" fill="none" stroke="#a5b4fc" stroke-width="10" stroke-linecap="round" opacity="0.6"/>
+</svg>
